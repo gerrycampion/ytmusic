@@ -1,16 +1,49 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Run YT Playlists",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "ytplaylists.py",
-            "console": "integratedTerminal",
-            // "args": "${command:pickArgs}"
-        }
-    ]
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Get Oauth",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": ["oauth"]
+    },
+    {
+      "name": "List problems",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": ["problems", "Volleyball Dirty", "6"]
+    },
+    {
+      "name": "Sort playlist",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": ["sort", "Volleyball Dirty", "Volleyball Temp"]
+    },
+    {
+      "name": "Clean explicit playlist",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": [
+        "clean",
+        "Volleyball Dirty",
+        "Volleyball Clean",
+        "Volleyball Temp"
+      ]
+    }
+  ]
 }

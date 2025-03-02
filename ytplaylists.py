@@ -1,128 +1,263 @@
+from argparse import ArgumentParser, Namespace
 from collections import Counter
-from ytmusicapi import YTMusic
+from os import environ
+from ytmusicapi import OAuthCredentials, YTMusic, setup_oauth
 
 
-ytmusic = YTMusic("oauth.json")
+ytmusic = YTMusic(
+    auth={
+        "scope": "https://www.googleapis.com/auth/youtube",
+        "token_type": "Bearer",
+        "access_token": environ["access_token"],
+        "refresh_token": environ["refresh_token"],
+        "expires_at": int(environ["expires_at"]),
+        "expires_in": int(environ["expires_in"]),
+    },
+    oauth_credentials=OAuthCredentials(
+        client_id=environ["client_id"], client_secret=environ["client_secret"]
+    ),
+)
 
 
-def add_individually(playlist_id, tracks):
-    for track in tracks:
-        status = ytmusic.add_playlist_items(playlist_id, [track["videoId"]])
-        if status["status"] != "STATUS_SUCCEEDED":
-            print(status)
-            print(track["title"])
-
-
-def add_bulk(playlist_id, tracks):
-    status = ytmusic.add_playlist_items(
-        playlist_id, [track["videoId"] for track in tracks]
-    )
-    if status["status"] != "STATUS_SUCCEEDED":
-        print(status)
-
-
-def delete_playlist(title):
-    playlist = [
+def get_playlist_id(playlist_title):
+    playlist_ids = [
         playlist["playlistId"]
         for playlist in ytmusic.get_library_playlists()
-        if playlist["title"] == title
+        if playlist["title"] == playlist_title
     ]
-    if playlist:
-        ytmusic.delete_playlist(playlist[0])
+    if playlist_ids:
+        return playlist_ids[0]
 
 
-def overwrite_playlist(title, tracks):
-    delete_playlist(title)
+def delete_playlist(playlist_title):
+    playlist_id = get_playlist_id(playlist_title)
+    if playlist_id:
+        ytmusic.delete_playlist(playlist_id)
+
+
+def overwrite_playlist(playlist_title, tracks):
+    delete_playlist(playlist_title)
     return ytmusic.create_playlist(
-        title, "", "PUBLIC", [track["videoId"] for track in tracks]
+        playlist_title, "", "PUBLIC", [track["videoId"] for track in tracks]
     )
 
 
-def get_tracks(title):
-    playlist = [
-        playlist
-        for playlist in ytmusic.get_library_playlists()
-        if playlist["title"] == title
-    ][0]
-    return ytmusic.get_playlist(playlist["playlistId"], int(playlist["count"]))[
-        "tracks"
+def rename_playlist(from_playlist_title, to_playlist_title):
+    delete_playlist(to_playlist_title)
+    playlist_id = get_playlist_id(from_playlist_title)
+    ytmusic.edit_playlist(playlistId=playlist_id, title=to_playlist_title)
+
+
+def get_tracks(playlist_title):
+    playlist_id = get_playlist_id(playlist_title)
+    return ytmusic.get_playlist(playlist_id, None)["tracks"]
+
+
+def sort_playlist(target_playlist_title, archive_playlist_title, key):
+    unsorted_tracks = get_tracks(target_playlist_title)
+    sorted_tracks = sorted(unsorted_tracks, key=key)
+    rename_playlist(target_playlist_title, archive_playlist_title)
+    overwrite_playlist(target_playlist_title, sorted_tracks)
+
+
+def get_duplicates(tracks):
+    tracks = sorted([sanitize_track_title(track["title"]) for track in tracks])
+    return [
+        track_title
+        for track_title, track_count in Counter(tracks).items()
+        if track_count > 1
+    ]
+    # TODO: get more info about the duplicates
+
+
+def get_tracks_longer_than(tracks, max_minutes):
+    max_seconds = max_minutes * 60
+    return [
+        {
+            "title": track["title"],
+            "artists": ",".join([artist["name"] for artist in track["artists"]]),
+            "duration": track["duration"],
+        }
+        for track in tracks
+        if track["duration_seconds"] > max_seconds
     ]
 
 
-def dirty_to_clean(dirty_title, clean_title, key):
-    dirty_playlist_songs = get_tracks(dirty_title)
+def get_unliked_tracks(tracks):
+    return [
+        {
+            "title": track["title"],
+            "artists": ",".join([artist["name"] for artist in track["artists"]]),
+            "likeStatus": track["likeStatus"],
+        }
+        for track in tracks
+        if not track["likeStatus"] == "LIKE"
+    ]
 
-    clean_tracks = [track for track in dirty_playlist_songs if not track["isExplicit"]]
-    dirty_tracks = [track for track in dirty_playlist_songs if track["isExplicit"]]
 
-    tracks = clean_tracks
-    uncleanables = []
+def get_unavailable_tracks(tracks):
+    return [
+        {
+            "title": track["title"],
+            "artists": ",".join([artist["name"] for artist in track["artists"]]),
+        }
+        for track in tracks
+        if not track["isAvailable"]
+    ]
 
-    for track in dirty_tracks:
+
+def sanitize_track_title(track_title):
+    return track_title.lower().split("(")[0].split("[")[0].strip()
+
+
+def explicit_to_clean(
+    explicit_playlist_title, clean_playlist_title, archive_playlist_title, key
+):
+    explicit_playlist_tracks = get_tracks(explicit_playlist_title)
+    archive_playlist_tracks = get_tracks(clean_playlist_title)
+
+    clean_tracks = [
+        track for track in explicit_playlist_tracks if not track["isExplicit"]
+    ]
+    explicit_tracks = [
+        track for track in explicit_playlist_tracks if track["isExplicit"]
+    ]
+
+    clean_playlist_tracks = clean_tracks
+    uncleanable_tracks = []
+
+    for explicit_track in explicit_tracks:
         # if track["title"] == "Empire State Of Mind (feat. Alicia Keys)":
         #     print ("ESM")
-        artist = track["artists"][0]["name"] if track["artists"] else ""
-        results = ytmusic.search(
-            f"{track['title']}{' ' if artist else ''}{artist}", "songs", None, 10
+        artist = (
+            explicit_track["artists"][0]["name"] if explicit_track["artists"] else ""
         )
-        results = [
-            result
-            for result in results
-            if not result["isExplicit"]
-            and normalize_title(result["title"]) == normalize_title(track["title"])
+        result_tracks = ytmusic.search(
+            f"{explicit_track['title']}{' ' if artist else ''}{artist}",
+            "songs",
+            None,
+            10,
+        )
+        result_tracks = [
+            result_track
+            for result_track in result_tracks
+            if not result_track["isExplicit"]
+            and sanitize_track_title(result_track["title"])
+            == sanitize_track_title(explicit_track["title"])
             # and result.get("album", {})["id"] == track.get("album", {})["id"]
             and (
-                (result["artists"][0]["id"] if result["artists"] else "")
-                == (track["artists"][0]["id"] if track["artists"] else "")
+                (result_track["artists"][0]["id"] if result_track["artists"] else "")
+                == (
+                    explicit_track["artists"][0]["id"]
+                    if explicit_track["artists"]
+                    else ""
+                )
             )
-            and track["duration_seconds"] >= result["duration_seconds"] - 5
+            and explicit_track["duration_seconds"]
+            >= result_track["duration_seconds"] - 5
         ]
-        if results:
-            tracks += [results[0]]
+        if result_tracks:
+            clean_playlist_tracks += [result_tracks[0]]
         else:
-            uncleanable = f"{track['title']} - {artist}"
-            print(uncleanable)
-            uncleanables += [uncleanable]
+            uncleanable_tracks += [
+                {
+                    "title": explicit_track["title"],
+                    "artists": ",".join(
+                        [artist["name"] for artist in explicit_track["artists"]]
+                    ),
+                }
+            ]
 
-    tracks = sorted(tracks, key=key)
+    clean_playlist_tracks = sorted(clean_playlist_tracks, key=key)
 
-    overwrite_playlist(clean_title, tracks)
+    rename_playlist(clean_playlist_title, archive_playlist_title)
+    overwrite_playlist(clean_playlist_title, clean_playlist_tracks)
 
-    with open("./uncleanable.txt", "w+") as fp:
-        for track in uncleanables:
-            fp.write(f"{track}\n")
-
-    return uncleanables
-
-
-def sort_playlist(unsorted_title, sorted_title, key):
-    unsorted_tracks = get_tracks(unsorted_title)
-    sorted_tracks = sorted(unsorted_tracks, key=key)
-    overwrite_playlist(sorted_title, sorted_tracks)
-
-
-def get_duplicates(title):
-    tracks = get_tracks(title)
-    tracks = sorted([normalize_title(track["title"]) for track in tracks])
-    return [title for title, count in Counter(tracks).items() if count > 1]
-
-
-def normalize_title(title):
-    return title.lower().split("(")[0].split("[")[0].strip()
-
-
-# print(get_duplicates("Volleyball Dirty"))
-
-# sort_playlist(
-#     "Volleyball Dirty", "Volleyball Dirty Sorted", lambda track: track["title"].upper()
-# )
-
-# dirty_to_clean(
-#     "Volleyball Dirty", "Volleyball Clean", lambda track: track["title"].upper()
-# )
+    archive_playlist_ids = {track["videoId"] for track in archive_playlist_tracks}
+    clean_playlist_ids = {track["videoId"] for track in clean_playlist_tracks}
+    added_tracks = [
+        {
+            "title": track["title"],
+            "artists": ",".join([artist["name"] for artist in track["artists"]]),
+        }
+        for track in clean_playlist_tracks
+        if track["videoId"] not in archive_playlist_ids
+    ]
+    removed_tracks = [
+        {
+            "title": track["title"],
+            "artists": ",".join([artist["name"] for artist in track["artists"]]),
+        }
+        for track in archive_playlist_tracks
+        if track["videoId"] not in clean_playlist_ids
+    ]
+    return uncleanable_tracks, added_tracks, removed_tracks
 
 
+def oauth(_: Namespace):
+    setup_oauth(
+        client_id=environ["client_id"],
+        client_secret=environ["client_secret"],
+        filepath="./oauth.json",
+        open_browser=True,
+    )
 
 
-# addIndividually(cleanPlaylist["playlistId"], cleanTracks)
-# add_bulk(clean_playlist["playlistId"], clean_tracks)
+def problems(args: Namespace):
+    tracks = get_tracks(args.playlist_title)
+    print(f"Duplicates\n{get_duplicates(tracks)}\n")
+    print(
+        f"Songs longer than {args.max_minutes} minutes\n{get_tracks_longer_than(tracks, args.max_minutes)}\n"
+    )
+    print(f"Unliked songs\n{get_unliked_tracks(tracks)}\n")
+    print(f"Unavailable songs\n{get_unavailable_tracks(tracks)}\n")
+
+
+def sort(args: Namespace):
+    sort_playlist(
+        args.target_playlist_title,
+        args.archive_playlist_title,
+        lambda track: track["title"].upper(),
+    )
+
+
+def clean(args: Namespace):
+    uncleanable_tracks, added_tracks, removed_tracks = explicit_to_clean(
+        args.explicit_playlist_title,
+        args.clean_playlist_title,
+        args.archive_playlist_title,
+        lambda track: track["title"].upper(),
+    )
+    print(f"Added\n{added_tracks}\n")
+    print(f"Removed\n{removed_tracks}\n")
+    print(f"Uncleanable\n{uncleanable_tracks}\n")
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    subparsers = parser.add_subparsers()
+
+    subparser = subparsers.add_parser("oauth")
+    subparser.set_defaults(func=oauth)
+
+    subparser = subparsers.add_parser("problems")
+    subparser.add_argument("playlist_title", type=str)
+    subparser.add_argument("max_minutes", type=int)
+    subparser.set_defaults(func=problems)
+
+    subparser = subparsers.add_parser("sort")
+    subparser.add_argument("target_playlist_title", type=str)
+    subparser.add_argument("archive_playlist_title", type=str)
+    subparser.set_defaults(func=sort)
+
+    subparser = subparsers.add_parser("clean")
+    subparser.add_argument("explicit_playlist_title", type=str)
+    subparser.add_argument("clean_playlist_title", type=str)
+    subparser.add_argument("archive_playlist_title", type=str)
+    subparser.set_defaults(func=clean)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+# TODO: add unit tests especially to make sure exceptions work

@@ -1,3 +1,5 @@
+/.venv
 /oauth.json
 /output
 /venv
+.env
