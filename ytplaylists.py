@@ -1,5 +1,5 @@
 from argparse import ArgumentParser, Namespace
-from collections import Counter
+from collections import defaultdict
 from os import environ
 from ytmusicapi import OAuthCredentials, YTMusic, setup_oauth
 
@@ -61,13 +61,19 @@ def sort_playlist(target_playlist_title, archive_playlist_title, key):
 
 
 def get_duplicates(tracks):
-    tracks = sorted([sanitize_track_title(track["title"]) for track in tracks])
-    return [
-        track_title
-        for track_title, track_count in Counter(tracks).items()
-        if track_count > 1
-    ]
-    # TODO: get more info about the duplicates
+    sanitized_tracks = defaultdict(list)
+    for track in tracks:
+        sanitized_tracks[sanitize_track_title(track["title"])].append(
+            {
+                "title": track["title"],
+                "artists": ",".join([artist["name"] for artist in track["artists"]]),
+            }
+        )
+    return {
+        track_title: track_list
+        for track_title, track_list in sanitized_tracks.items()
+        if len(track_list) > 1
+    }
 
 
 def get_tracks_longer_than(tracks, max_minutes):
