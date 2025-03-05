@@ -214,7 +214,7 @@ def problems(args: Namespace):
     )
     print(
         create_md_table(
-            "Songs longer than {args.max_minutes} minutes",
+            f"Songs longer than {args.max_minutes} minutes",
             ("title", "artists", "duration"),
             get_tracks_longer_than(tracks, args.max_minutes),
         )
