@@ -25,14 +25,22 @@ def get_artists(track):
 
 def get_property(track, property):
     property_map = {"artists": get_artists}
-    return property_map.get(property, lambda track: f"{track[property]}")(track)
+    return property_map.get(property, lambda track: f"{track[property]}")(
+        track
+    ).replace("|", "\\|")
 
 
-def print_tracks(tracks, properties):
-    return "\n".join(
-        " - ".join([get_property(track, property) for property in properties])
-        for track in tracks
+def create_md_table(table_name, headers, records):
+    title = f"### {table_name}"
+    header = "| " + " | ".join(headers) + " |"
+    underline = "| " + " | ".join(["---" for _ in headers]) + " |"
+    values = "\n".join(
+        "| "
+        + " | ".join([get_property(record, property) for property in headers])
+        + " |"
+        for record in records
     )
+    return f"{title}\n{header}\n{underline}\n{values}"
 
 
 def get_playlist_id(playlist_title):
@@ -79,12 +87,16 @@ def sort_playlist(target_playlist_title, archive_playlist_title, key):
 def get_duplicates(tracks):
     sanitized_tracks = defaultdict(list)
     for track in tracks:
-        sanitized_tracks[sanitize_track_title(track["title"])].append(track)
-    return {
-        track_title: track_list
-        for track_title, track_list in sanitized_tracks.items()
+        sanitizedTitle = sanitize_track_title(track["title"])
+        sanitized_tracks[sanitizedTitle].append(
+            {"sanitizedTitle": sanitizedTitle} | track
+        )
+    return [
+        track
+        for _, track_list in sanitized_tracks.items()
         if len(track_list) > 1
-    }
+        for track in track_list
+    ]
 
 
 def get_tracks_longer_than(tracks, max_minutes):
@@ -194,23 +206,41 @@ def oauth(_: Namespace):
 
 def problems(args: Namespace):
     tracks = get_tracks(args.playlist_title)
-    duplicates = get_duplicates(tracks)
-    print("Duplicates\n")
-    for title, matches in duplicates.items():
-        print(f"{title}")
-        print(f"{print_tracks(matches, ("title", "artists"))}\n")
     print(
-        f"Songs longer than {args.max_minutes} minutes\n"
-        f"{print_tracks(get_tracks_longer_than(tracks, args.max_minutes), ("title", "artists", "duration"))}\n"
+        create_md_table(
+            "Duplicates", ("sanitizedTitle", "title", "artists"), get_duplicates(tracks)
+        )
+        + "\n"
     )
     print(
-        f"Unliked songs\n{print_tracks(get_unliked_tracks(tracks), ("title", "artists", "likeStatus"))}\n"
+        create_md_table(
+            "Songs longer than {args.max_minutes} minutes",
+            ("title", "artists", "duration"),
+            get_tracks_longer_than(tracks, args.max_minutes),
+        )
+        + "\n"
     )
     print(
-        f"Unavailable songs\n{print_tracks(get_unavailable_tracks(tracks), ("title", "artists"))}\n"
+        create_md_table(
+            "Unliked songs",
+            ("title", "artists", "likeStatus"),
+            get_unliked_tracks(tracks),
+        )
+        + "\n"
     )
     print(
-        f"Low-quality\n{print_tracks(get_low_quality_tracks(tracks), ("title", "artists", "videoType"))}\n"
+        create_md_table(
+            "Unavailable songs", ("title", "artists"), get_unavailable_tracks(tracks)
+        )
+        + "\n"
+    )
+    print(
+        create_md_table(
+            "Low-quality",
+            ("title", "artists", "videoType"),
+            get_low_quality_tracks(tracks),
+        )
+        + "\n"
     )
 
 
@@ -229,9 +259,30 @@ def clean(args: Namespace):
         args.archive_playlist_title,
         lambda track: track["title"].upper(),
     )
-    print(f"Added\n{print_tracks(added_tracks, ("title", "artists"))}\n")
-    print(f"Removed\n{print_tracks(removed_tracks, ("title", "artists"))}\n")
-    print(f"Uncleanable\n{print_tracks(uncleanable_tracks, ("title", "artists"))}\n")
+    print(
+        create_md_table(
+            "Added",
+            ("title", "artists"),
+            added_tracks,
+        )
+        + "\n"
+    )
+    print(
+        create_md_table(
+            "Removed",
+            ("title", "artists"),
+            removed_tracks,
+        )
+        + "\n"
+    )
+    print(
+        create_md_table(
+            "Uncleanable",
+            ("title", "artists"),
+            uncleanable_tracks,
+        )
+        + "\n"
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+name: Problems
+on: workflow_dispatch
+jobs:
+  problems:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python ytplaylists.py problems "Volleyball Dirty" "6" >> $GITHUB_STEP_SUMMARY
