@@ -9,3 +9,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: python ytplaylists.py clean "Volleyball Dirty" "Volleyball Clean" "Volleyball Temp" >> $GITHUB_STEP_SUMMARY
+        env:
+          client_id: ${{ secrets.CLIENT_ID }}
+          client_secret: ${{ secrets.CLIENT_SECRET }}
+          access_token: ${{ secrets.ACCESS_TOKEN }}
+          refresh_token: ${{ secrets.REFRESH_TOKEN }}

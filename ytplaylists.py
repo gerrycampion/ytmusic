@@ -10,8 +10,6 @@ ytmusic = YTMusic(
         "token_type": "Bearer",
         "access_token": environ["access_token"],
         "refresh_token": environ["refresh_token"],
-        "expires_at": int(environ["expires_at"]),
-        "expires_in": int(environ["expires_in"]),
     },
     oauth_credentials=OAuthCredentials(
         client_id=environ["client_id"], client_secret=environ["client_secret"]
@@ -84,6 +82,10 @@ def sort_playlist(target_playlist_title, archive_playlist_title, key):
     overwrite_playlist(target_playlist_title, sorted_tracks)
 
 
+def get_unavailable_tracks(tracks):
+    return [track for track in tracks if not track["isAvailable"]]
+
+
 def get_duplicates(tracks):
     sanitized_tracks = defaultdict(list)
     for track in tracks:
@@ -105,11 +107,11 @@ def get_tracks_longer_than(tracks, max_minutes):
 
 
 def get_unliked_tracks(tracks):
-    return [track for track in tracks if not track["likeStatus"] == "LIKE"]
-
-
-def get_unavailable_tracks(tracks):
-    return [track for track in tracks if not track["isAvailable"]]
+    return [
+        track
+        for track in tracks
+        if track["isAvailable"] and not track["likeStatus"] == "LIKE"
+    ]
 
 
 def get_low_quality_tracks(tracks):
@@ -208,6 +210,12 @@ def problems(args: Namespace):
     tracks = get_tracks(args.playlist_title)
     print(
         create_md_table(
+            "Unavailable songs", ("title", "artists"), get_unavailable_tracks(tracks)
+        )
+        + "\n"
+    )
+    print(
+        create_md_table(
             "Duplicates", ("sanitizedTitle", "title", "artists"), get_duplicates(tracks)
         )
         + "\n"
@@ -225,12 +233,6 @@ def problems(args: Namespace):
             "Unliked songs",
             ("title", "artists", "likeStatus"),
             get_unliked_tracks(tracks),
-        )
-        + "\n"
-    )
-    print(
-        create_md_table(
-            "Unavailable songs", ("title", "artists"), get_unavailable_tracks(tracks)
         )
         + "\n"
     )
