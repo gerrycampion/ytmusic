@@ -19,6 +19,22 @@ ytmusic = YTMusic(
 )
 
 
+def get_artists(track):
+    return ", ".join([artist["name"] for artist in track["artists"]])
+
+
+def get_property(track, property):
+    property_map = {"artists": get_artists}
+    return property_map.get(property, lambda track: f"{track[property]}")(track)
+
+
+def print_tracks(tracks, properties):
+    return "\n".join(
+        " - ".join([get_property(track, property) for property in properties])
+        for track in tracks
+    )
+
+
 def get_playlist_id(playlist_title):
     playlist_ids = [
         playlist["playlistId"]
@@ -63,12 +79,7 @@ def sort_playlist(target_playlist_title, archive_playlist_title, key):
 def get_duplicates(tracks):
     sanitized_tracks = defaultdict(list)
     for track in tracks:
-        sanitized_tracks[sanitize_track_title(track["title"])].append(
-            {
-                "title": track["title"],
-                "artists": ",".join([artist["name"] for artist in track["artists"]]),
-            }
-        )
+        sanitized_tracks[sanitize_track_title(track["title"])].append(track)
     return {
         track_title: track_list
         for track_title, track_list in sanitized_tracks.items()
@@ -78,37 +89,22 @@ def get_duplicates(tracks):
 
 def get_tracks_longer_than(tracks, max_minutes):
     max_seconds = max_minutes * 60
-    return [
-        {
-            "title": track["title"],
-            "artists": ",".join([artist["name"] for artist in track["artists"]]),
-            "duration": track["duration"],
-        }
-        for track in tracks
-        if track["duration_seconds"] > max_seconds
-    ]
+    return [track for track in tracks if track["duration_seconds"] > max_seconds]
 
 
 def get_unliked_tracks(tracks):
-    return [
-        {
-            "title": track["title"],
-            "artists": ",".join([artist["name"] for artist in track["artists"]]),
-            "likeStatus": track["likeStatus"],
-        }
-        for track in tracks
-        if not track["likeStatus"] == "LIKE"
-    ]
+    return [track for track in tracks if not track["likeStatus"] == "LIKE"]
 
 
 def get_unavailable_tracks(tracks):
+    return [track for track in tracks if not track["isAvailable"]]
+
+
+def get_low_quality_tracks(tracks):
     return [
-        {
-            "title": track["title"],
-            "artists": ",".join([artist["name"] for artist in track["artists"]]),
-        }
+        track
         for track in tracks
-        if not track["isAvailable"]
+        if track["isAvailable"] and track["videoType"] != "MUSIC_VIDEO_TYPE_ATV"
     ]
 
 
@@ -165,14 +161,7 @@ def explicit_to_clean(
         if result_tracks:
             clean_playlist_tracks += [result_tracks[0]]
         else:
-            uncleanable_tracks += [
-                {
-                    "title": explicit_track["title"],
-                    "artists": ",".join(
-                        [artist["name"] for artist in explicit_track["artists"]]
-                    ),
-                }
-            ]
+            uncleanable_tracks += [explicit_track]
 
     clean_playlist_tracks = sorted(clean_playlist_tracks, key=key)
 
@@ -182,18 +171,12 @@ def explicit_to_clean(
     archive_playlist_ids = {track["videoId"] for track in archive_playlist_tracks}
     clean_playlist_ids = {track["videoId"] for track in clean_playlist_tracks}
     added_tracks = [
-        {
-            "title": track["title"],
-            "artists": ",".join([artist["name"] for artist in track["artists"]]),
-        }
+        track
         for track in clean_playlist_tracks
         if track["videoId"] not in archive_playlist_ids
     ]
     removed_tracks = [
-        {
-            "title": track["title"],
-            "artists": ",".join([artist["name"] for artist in track["artists"]]),
-        }
+        track
         for track in archive_playlist_tracks
         if track["videoId"] not in clean_playlist_ids
     ]
@@ -211,12 +194,24 @@ def oauth(_: Namespace):
 
 def problems(args: Namespace):
     tracks = get_tracks(args.playlist_title)
-    print(f"Duplicates\n{get_duplicates(tracks)}\n")
+    duplicates = get_duplicates(tracks)
+    print("Duplicates\n")
+    for title, matches in duplicates.items():
+        print(f"{title}")
+        print(f"{print_tracks(matches, ("title", "artists"))}\n")
     print(
-        f"Songs longer than {args.max_minutes} minutes\n{get_tracks_longer_than(tracks, args.max_minutes)}\n"
+        f"Songs longer than {args.max_minutes} minutes\n"
+        f"{print_tracks(get_tracks_longer_than(tracks, args.max_minutes), ("title", "artists", "duration"))}\n"
     )
-    print(f"Unliked songs\n{get_unliked_tracks(tracks)}\n")
-    print(f"Unavailable songs\n{get_unavailable_tracks(tracks)}\n")
+    print(
+        f"Unliked songs\n{print_tracks(get_unliked_tracks(tracks), ("title", "artists", "likeStatus"))}\n"
+    )
+    print(
+        f"Unavailable songs\n{print_tracks(get_unavailable_tracks(tracks), ("title", "artists"))}\n"
+    )
+    print(
+        f"Low-quality\n{print_tracks(get_low_quality_tracks(tracks), ("title", "artists", "videoType"))}\n"
+    )
 
 
 def sort(args: Namespace):
@@ -234,9 +229,9 @@ def clean(args: Namespace):
         args.archive_playlist_title,
         lambda track: track["title"].upper(),
     )
-    print(f"Added\n{added_tracks}\n")
-    print(f"Removed\n{removed_tracks}\n")
-    print(f"Uncleanable\n{uncleanable_tracks}\n")
+    print(f"Added\n{print_tracks(added_tracks, ("title", "artists"))}\n")
+    print(f"Removed\n{print_tracks(removed_tracks, ("title", "artists"))}\n")
+    print(f"Uncleanable\n{print_tracks(uncleanable_tracks, ("title", "artists"))}\n")
 
 
 if __name__ == "__main__":
