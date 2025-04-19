@@ -81,9 +81,14 @@ def clear_playlist(playlist_title):
 
 
 def overwrite_playlist(target_playlist_title, archive_playlist_title, tracks):
-    clear_playlist(archive_playlist_title)
-    target_playlist_id = get_playlist_id(target_playlist_title)
     archive_playlist_id = get_playlist_id(archive_playlist_title)
+    if archive_playlist_id:
+        clear_playlist(archive_playlist_title)
+    else:
+        archive_playlist_id = ytmusic.create_playlist(
+            archive_playlist_title, "", "PUBLIC", []
+        )
+    target_playlist_id = get_playlist_id(target_playlist_title)
     ytmusic.add_playlist_items(
         playlistId=archive_playlist_id, source_playlist=target_playlist_id
     )
