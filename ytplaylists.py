@@ -57,7 +57,8 @@ def delete_playlist(playlist_title):
         ytmusic.delete_playlist(playlist_id)
 
 
-def overwrite_playlist(playlist_title, tracks):
+@DeprecationWarning
+def replace_playlist(playlist_title, tracks):
     delete_playlist(playlist_title)
     return ytmusic.create_playlist(
         playlist_title, "", "PUBLIC", [track["videoId"] for track in tracks]
@@ -70,6 +71,29 @@ def rename_playlist(from_playlist_title, to_playlist_title):
     ytmusic.edit_playlist(playlistId=playlist_id, title=to_playlist_title)
 
 
+def clear_playlist(playlist_title):
+    playlist_id = get_playlist_id(playlist_title)
+    tracks = get_tracks(playlist_title)
+    ytmusic.remove_playlist_items(
+        playlistId=playlist_id,
+        videos=tracks,
+    )
+
+
+def overwrite_playlist(target_playlist_title, archive_playlist_title, tracks):
+    clear_playlist(archive_playlist_title)
+    target_playlist_id = get_playlist_id(target_playlist_title)
+    archive_playlist_id = get_playlist_id(archive_playlist_title)
+    ytmusic.add_playlist_items(
+        playlistId=archive_playlist_id, source_playlist=target_playlist_id
+    )
+    clear_playlist(target_playlist_title)
+    ytmusic.add_playlist_items(
+        playlistId=target_playlist_id,
+        videoIds=[track["videoId"] for track in tracks],
+    )
+
+
 def get_tracks(playlist_title):
     playlist_id = get_playlist_id(playlist_title)
     return ytmusic.get_playlist(playlist_id, None)["tracks"]
@@ -78,8 +102,7 @@ def get_tracks(playlist_title):
 def sort_playlist(target_playlist_title, archive_playlist_title, key):
     unsorted_tracks = get_tracks(target_playlist_title)
     sorted_tracks = sorted(unsorted_tracks, key=key)
-    rename_playlist(target_playlist_title, archive_playlist_title)
-    overwrite_playlist(target_playlist_title, sorted_tracks)
+    overwrite_playlist(target_playlist_title, archive_playlist_title, sorted_tracks)
 
 
 def get_unavailable_tracks(tracks):
@@ -179,8 +202,9 @@ def explicit_to_clean(
 
     clean_playlist_tracks = sorted(clean_playlist_tracks, key=key)
 
-    rename_playlist(clean_playlist_title, archive_playlist_title)
-    overwrite_playlist(clean_playlist_title, clean_playlist_tracks)
+    overwrite_playlist(
+        clean_playlist_title, archive_playlist_title, clean_playlist_tracks
+    )
 
     archive_playlist_ids = {track["videoId"] for track in archive_playlist_tracks}
     clean_playlist_ids = {track["videoId"] for track in clean_playlist_tracks}
