@@ -74,10 +74,11 @@ def rename_playlist(from_playlist_title, to_playlist_title):
 def clear_playlist(playlist_title):
     playlist_id = get_playlist_id(playlist_title)
     tracks = get_tracks(playlist_title)
-    ytmusic.remove_playlist_items(
-        playlistId=playlist_id,
-        videos=tracks,
-    )
+    if playlist_id and tracks:
+        ytmusic.remove_playlist_items(
+            playlistId=playlist_id,
+            videos=tracks,
+        )
 
 
 def overwrite_playlist(target_playlist_title, archive_playlist_title, tracks):
