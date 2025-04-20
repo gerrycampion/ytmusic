@@ -2,8 +2,11 @@ from argparse import ArgumentParser, Namespace
 from collections import defaultdict
 from os import environ
 from ytmusicapi import OAuthCredentials, YTMusic, setup_oauth
+import requests
+from functools import partial
 
-
+session = requests.Session()
+session.request = partial(session.request, timeout=100)
 ytmusic = YTMusic(
     auth={
         "scope": "https://www.googleapis.com/auth/youtube",
@@ -14,6 +17,7 @@ ytmusic = YTMusic(
     oauth_credentials=OAuthCredentials(
         client_id=environ["client_id"], client_secret=environ["client_secret"]
     ),
+    requests_session=session,
 )
 
 
