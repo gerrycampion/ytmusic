@@ -31,7 +31,7 @@ def get_property(track, property):
 
 
 def create_md_table(table_name, headers, records):
-    title = f"### {table_name}"
+    title = f"### {table_name} ({len(records)})"
     header = "| " + " | ".join(headers) + " |"
     underline = "| " + " | ".join(["---" for _ in headers]) + " |"
     values = "\n".join(
