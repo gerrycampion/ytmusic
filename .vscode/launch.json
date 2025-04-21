@@ -44,6 +44,15 @@
         "Volleyball Clean",
         "Volleyball Temp"
       ]
+    },
+    {
+      "name": "Compare playlists",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": ["compare", "Volleyball Dirty", "Volleyball Temp"]
     }
   ]
 }

@@ -238,6 +238,31 @@ def oauth(_: Namespace):
     )
 
 
+def compare(args: Namespace):
+    tracks_1 = get_tracks(args.playlist_title_1)
+    print(f"Size of {args.playlist_title_1}: {len(tracks_1)}")
+    track_ids_1 = {track["videoId"] for track in tracks_1}
+    tracks_2 = get_tracks(args.playlist_title_2)
+    print(f"Size of {args.playlist_title_2}: {len(tracks_2)}")
+    track_ids_2 = {track["videoId"] for track in tracks_2}
+    print(
+        create_md_table(
+            f"Tracks in {args.playlist_title_1} but not in {args.playlist_title_2}",
+            ("title", "artists"),
+            [track for track in tracks_1 if track["videoId"] not in track_ids_2],
+        )
+        + "\n"
+    )
+    print(
+        create_md_table(
+            f"Tracks in {args.playlist_title_2} but not in {args.playlist_title_1}",
+            ("title", "artists"),
+            [track for track in tracks_2 if track["videoId"] not in track_ids_1],
+        )
+        + "\n"
+    )
+
+
 def problems(args: Namespace):
     tracks = get_tracks(args.playlist_title)
     print(
@@ -325,6 +350,11 @@ if __name__ == "__main__":
 
     subparser = subparsers.add_parser("oauth")
     subparser.set_defaults(func=oauth)
+
+    subparser = subparsers.add_parser("compare")
+    subparser.add_argument("playlist_title_1", type=str)
+    subparser.add_argument("playlist_title_2", type=str)
+    subparser.set_defaults(func=compare)
 
     subparser = subparsers.add_parser("problems")
     subparser.add_argument("playlist_title", type=str)
