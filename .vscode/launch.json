@@ -53,6 +53,14 @@
       "console": "integratedTerminal",
       //"justMyCode": false,
       "args": ["compare", "Volleyball Dirty", "Volleyball Temp"]
+    },
+    {
+      "name": "Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal"
+      //"justMyCode": false,
     }
   ]
 }
