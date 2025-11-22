@@ -5,14 +5,25 @@ from os import environ
 from ytmusicapi import OAuthCredentials, YTMusic, setup_oauth
 import requests
 from typing import Literal
+from google.oauth2.credentials import Credentials
+from googleapiclient import discovery
+from google_auth_oauthlib.flow import InstalledAppFlow
 
-auth: Literal["browser", "oauth"] | None = None
+
+AUTH: Literal["browser", "oauth"] | None = None
+MAX_RESULTS = 50
+SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 
 class YTPlaylists:
 
     def __init__(self):
-        match auth:
+        credentials = Credentials.from_authorized_user_info(
+            eval(environ["youtube_token"]), SCOPES
+        )
+        self.youtube = discovery.build("youtube", "v3", credentials=credentials)
+
+        match AUTH:
             case "browser":
                 with open("browser.json", "r") as browser_file:
                     browser_json = load(browser_file)
@@ -22,7 +33,7 @@ class YTPlaylists:
             case "oauth":
                 self.ytmusic = YTMusic(
                     auth={
-                        "scope": "https://www.googleapis.com/auth/youtube",
+                        "scope": SCOPES[0],
                         "token_type": "Bearer",
                         "access_token": environ["access_token"],
                         "refresh_token": environ["refresh_token"],
@@ -38,15 +49,19 @@ class YTPlaylists:
                 self.ytmusic = YTMusic()
 
     @staticmethod
-    def get_artists(track):
-        return ", ".join([artist["name"] for artist in track["artists"]])
-
-    @staticmethod
-    def get_property(track, property):
-        property_map = {"artists": YTPlaylists.get_artists}
-        return property_map.get(property, lambda track: f"{track[property]}")(
-            track
-        ).replace("|", "\\|")
+    def fetch_all(method, **kwargs):
+        all_items = []
+        next_page_token = None
+        while True:
+            results = method(
+                maxResults=MAX_RESULTS,
+                pageToken=next_page_token,
+                **kwargs,
+            ).execute()
+            all_items.extend(results["items"])
+            next_page_token = results.get("nextPageToken")
+            if not next_page_token:
+                return all_items
 
     @staticmethod
     def create_md_table(table_name, headers, records):
@@ -55,22 +70,22 @@ class YTPlaylists:
         underline = "| " + " | ".join(["---" for _ in headers]) + " |"
         values = "\n".join(
             "| "
-            + " | ".join(
-                [YTPlaylists.get_property(record, property) for property in headers]
-            )
+            + " | ".join([record[property].replace("|", "\\|") for property in headers])
             + " |"
             for record in records
         )
         return f"{title}\n{header}\n{underline}\n{values}"
 
     def get_playlist_id(self, playlist_title):
-        playlist_ids = [
-            playlist["playlistId"]
-            for playlist in self.ytmusic.get_library_playlists()
-            if playlist["title"] == playlist_title
-        ]
-        if playlist_ids:
-            return playlist_ids[0]
+        playlists = self.fetch_all(
+            self.youtube.playlists().list,
+            part="contentDetails,id,snippet,status",
+            mine=True,
+        )
+        playlist_title_id = {
+            playlist["snippet"]["title"]: playlist["id"] for playlist in playlists
+        }
+        return playlist_title_id.get(playlist_title)
 
     def delete_playlist(self, playlist_title):
         playlist_id = self.get_playlist_id(playlist_title)
@@ -116,9 +131,73 @@ class YTPlaylists:
             videoIds=[track["videoId"] for track in tracks],
         )
 
+    @staticmethod
+    def get_track_details(track):
+        details = {
+            "title": track["snippet"]["title"],
+            "titleLink": f"[{track['snippet']['title']}](https://www.youtube.com/watch?v={track['contentDetails']['videoId']})",
+            "artists": track["ytmusic"].get("artists", []),
+            "artistNames": ", ".join(
+                [artist["name"] for artist in track["ytmusic"].get("artists", [])]
+            ),
+            "duration": track["ytmusic"].get("duration"),
+            "duration_seconds": track["ytmusic"].get("duration_seconds", 0),
+            "historicalLink": f"[{track['contentDetails']['videoId']}](https://quiteaplaylist.com/search?url=https://www.youtube.com/watch?v={track['contentDetails']['videoId']})",
+            "isAvailable": track["ytmusic"].get("isAvailable", None),
+            "isExplicit": track["ytmusic"].get("isExplicit", None),
+            "likeStatus": track.get("rating", {}).get("rating"),
+            "privacyStatus": track["status"]["privacyStatus"],
+            "videoId": track["contentDetails"]["videoId"],
+            "videoType": track["ytmusic"].get("videoType"),
+        }
+        return details
+
     def get_tracks(self, playlist_title):
         playlist_id = self.get_playlist_id(playlist_title)
-        return self.ytmusic.get_playlist(playlist_id, None)["tracks"]
+        tracks_from_ytmusic = self.ytmusic.get_playlist(playlist_id, None)["tracks"]
+        tracks_from_youtube = self.fetch_all(
+            self.youtube.playlistItems().list,
+            playlistId=playlist_id,
+            part="contentDetails,id,snippet,status",
+        )
+        videos_details = []
+        videos_ratings = []
+        video_ids_arr = [
+            track["contentDetails"]["videoId"] for track in tracks_from_youtube
+        ]
+        for i in range(0, len(video_ids_arr), MAX_RESULTS):
+            video_ids_str = ",".join(video_ids_arr[i : i + MAX_RESULTS])
+            videos_chunk = (
+                self.youtube.videos()
+                .list(
+                    part="contentDetails,id,liveStreamingDetails,paidProductPlacementDetails,recordingDetails,snippet,statistics,status,topicDetails",
+                    id=video_ids_str,
+                    hl="en",
+                )
+                .execute()["items"]
+            )
+            videos_details.extend(videos_chunk)
+            videos_chunk = (
+                self.youtube.videos()
+                .getRating(
+                    id=video_ids_str,
+                )
+                .execute()["items"]
+            )
+            videos_ratings.extend(videos_chunk)
+        video_details_dict = {video["id"]: video for video in videos_details}
+        video_ratings_dict = {video["videoId"]: video for video in videos_ratings}
+        ytmusic_dict = {track["videoId"]: track for track in tracks_from_ytmusic}
+        for track in tracks_from_youtube:
+            track["details"] = video_details_dict.get(
+                track["contentDetails"]["videoId"], {}
+            )
+            track["rating"] = video_ratings_dict.get(
+                track["contentDetails"]["videoId"], {}
+            )
+            track["ytmusic"] = ytmusic_dict.get(track["contentDetails"]["videoId"], {})
+            track.update(YTPlaylists.get_track_details(track))
+        return tracks_from_youtube
 
     def sort_playlist(self, target_playlist_title, archive_playlist_title, key):
         unsorted_tracks = self.get_tracks(target_playlist_title)
@@ -129,7 +208,11 @@ class YTPlaylists:
 
     @staticmethod
     def get_unavailable_tracks(tracks):
-        return [track for track in tracks if not track["isAvailable"]]
+        return [
+            track
+            for track in tracks
+            if track["privacyStatus"] != "public" or not track["ytmusic"]
+        ]
 
     @staticmethod
     def get_duplicates(tracks):
@@ -156,7 +239,7 @@ class YTPlaylists:
         return [
             track
             for track in tracks
-            if track["isAvailable"] and not track["likeStatus"] == "LIKE"
+            if track["isAvailable"] and not track["likeStatus"] == "like"
         ]
 
     @staticmethod
@@ -253,13 +336,29 @@ class YTPlaylists:
         return uncleanable_tracks, added_tracks, removed_tracks
 
 
-def oauth(_: Namespace):
+def ytmusic_oauth(_: Namespace):
     setup_oauth(
         client_id=environ["client_id"],
         client_secret=environ["client_secret"],
         filepath="./oauth.json",
         open_browser=True,
     )
+
+
+def ytmusic_browser(_: Namespace):
+    pass  # TODO
+
+
+def youtube_oauth(_: Namespace):
+    # Disable OAuthlib's HTTPS verification when running locally.
+    # *DO NOT* leave this option enabled in production.
+    environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    credentials = InstalledAppFlow.from_client_secrets_file(
+        environ["youtube_client_secrets_file"], SCOPES
+    ).run_local_server()
+    with open("token.json", "w") as token:
+        # TODO: write this to env file instead?
+        token.write(credentials.to_json())
 
 
 def compare(args: Namespace):
@@ -273,7 +372,7 @@ def compare(args: Namespace):
     print(
         yt_playlists.create_md_table(
             f"Tracks in {args.playlist_title_1} but not in {args.playlist_title_2}",
-            ("title", "artists"),
+            ("titleLink", "artistNames"),
             [track for track in tracks_1 if track["videoId"] not in track_ids_2],
         )
         + "\n"
@@ -281,7 +380,7 @@ def compare(args: Namespace):
     print(
         yt_playlists.create_md_table(
             f"Tracks in {args.playlist_title_2} but not in {args.playlist_title_1}",
-            ("title", "artists"),
+            ("titleLink", "artistNames"),
             [track for track in tracks_2 if track["videoId"] not in track_ids_1],
         )
         + "\n"
@@ -294,7 +393,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Unavailable songs",
-            ("title", "artists"),
+            ("titleLink", "artistNames", "privacyStatus", "historicalLink"),
             yt_playlists.get_unavailable_tracks(tracks),
         )
         + "\n"
@@ -302,7 +401,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Duplicates",
-            ("sanitizedTitle", "title", "artists"),
+            ("sanitizedTitle", "titleLink", "artistNames"),
             yt_playlists.get_duplicates(tracks),
         )
         + "\n"
@@ -310,7 +409,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             f"Songs longer than {args.max_minutes} minutes",
-            ("title", "artists", "duration"),
+            ("titleLink", "artistNames", "duration"),
             yt_playlists.get_tracks_longer_than(tracks, args.max_minutes),
         )
         + "\n"
@@ -318,7 +417,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Unliked songs",
-            ("title", "artists", "likeStatus"),
+            ("titleLink", "artistNames", "likeStatus"),
             yt_playlists.get_unliked_tracks(tracks),
         )
         + "\n"
@@ -326,7 +425,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Low-quality",
-            ("title", "artists", "videoType"),
+            ("titleLink", "artistNames", "videoType"),
             yt_playlists.get_low_quality_tracks(tracks),
         )
         + "\n"
@@ -380,8 +479,14 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     subparsers = parser.add_subparsers()
 
-    subparser = subparsers.add_parser("oauth")
-    subparser.set_defaults(func=oauth)
+    subparser = subparsers.add_parser("ytmusic_oauth")
+    subparser.set_defaults(func=ytmusic_oauth)
+
+    subparser = subparsers.add_parser("ytmusic_browser")
+    subparser.set_defaults(func=ytmusic_browser)
+
+    subparser = subparsers.add_parser("youtube_oauth")
+    subparser.set_defaults(func=youtube_oauth)
 
     subparser = subparsers.add_parser("compare")
     subparser.add_argument("playlist_title_1", type=str)

@@ -1,5 +1,8 @@
 /.venv
+/client_secret_*.json
+/browser.json
 /oauth.json
+/token.json
 /output
 /venv
 .env
