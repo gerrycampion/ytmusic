@@ -202,6 +202,9 @@ class YTPlaylists:
         video_details_dict = {track["id"]: track for track in videos_details}
         video_ratings_dict = {track["videoId"]: track for track in videos_ratings}
         ytmusic_dict = {track["videoId"]: track for track in tracks_from_ytmusic}
+        missing_from_ytmusic = set(youtube_dict.keys()) - set(ytmusic_dict.keys())
+        for video_id in missing_from_ytmusic:
+            ytmusic_dict[video_id] = self.ytmusic.get_song(video_id)
         tracks = []
         for videoId in all_video_ids:
             track = {
