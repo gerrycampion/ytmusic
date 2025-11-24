@@ -133,21 +133,26 @@ class YTPlaylists:
 
     @staticmethod
     def get_track_details(track):
+        title = track["youtube"].get("snippet", {}).get("title", "") or track[
+            "ytmusic"
+        ].get("title", "")
         details = {
-            "title": track["snippet"]["title"],
-            "titleLink": f"[{track['snippet']['title']}](https://www.youtube.com/watch?v={track['contentDetails']['videoId']})",
+            "title": title,
+            "titleLink": f"[{title}](https://www.youtube.com/watch?v={track['videoId']})",
+            "album": (track["ytmusic"].get("album") or {}).get("name", ""),
             "artists": track["ytmusic"].get("artists", []),
             "artistNames": ", ".join(
                 [artist["name"] for artist in track["ytmusic"].get("artists", [])]
             ),
             "duration": track["ytmusic"].get("duration"),
             "duration_seconds": track["ytmusic"].get("duration_seconds", 0),
-            "historicalLink": f"[{track['contentDetails']['videoId']}](https://quiteaplaylist.com/search?url=https://www.youtube.com/watch?v={track['contentDetails']['videoId']})",
+            "historicalLink": f"[{track['videoId']}](https://quiteaplaylist.com/search?url=https://www.youtube.com/watch?v={track['videoId']})",
             "isAvailable": track["ytmusic"].get("isAvailable", None),
             "isExplicit": track["ytmusic"].get("isExplicit", None),
             "likeStatus": track.get("rating", {}).get("rating"),
-            "privacyStatus": track["status"]["privacyStatus"],
-            "videoId": track["contentDetails"]["videoId"],
+            "privacyStatus": track["youtube"]
+            .get("status", {})
+            .get("privacyStatus", ""),
             "videoType": track["ytmusic"].get("videoType"),
         }
         return details
@@ -162,11 +167,17 @@ class YTPlaylists:
         )
         videos_details = []
         videos_ratings = []
-        video_ids_arr = [
-            track["contentDetails"]["videoId"] for track in tracks_from_youtube
-        ]
-        for i in range(0, len(video_ids_arr), MAX_RESULTS):
-            video_ids_str = ",".join(video_ids_arr[i : i + MAX_RESULTS])
+        all_video_ids = list(
+            {
+                videoId: None
+                for videoId in [
+                    track["contentDetails"]["videoId"] for track in tracks_from_youtube
+                ]
+                + [track["videoId"] for track in tracks_from_ytmusic]
+            }.keys()
+        )
+        for i in range(0, len(all_video_ids), MAX_RESULTS):
+            video_ids_str = ",".join(all_video_ids[i : i + MAX_RESULTS])
             videos_chunk = (
                 self.youtube.videos()
                 .list(
@@ -185,19 +196,24 @@ class YTPlaylists:
                 .execute()["items"]
             )
             videos_ratings.extend(videos_chunk)
-        video_details_dict = {video["id"]: video for video in videos_details}
-        video_ratings_dict = {video["videoId"]: video for video in videos_ratings}
+        youtube_dict = {
+            track["contentDetails"]["videoId"]: track for track in tracks_from_youtube
+        }
+        video_details_dict = {track["id"]: track for track in videos_details}
+        video_ratings_dict = {track["videoId"]: track for track in videos_ratings}
         ytmusic_dict = {track["videoId"]: track for track in tracks_from_ytmusic}
-        for track in tracks_from_youtube:
-            track["details"] = video_details_dict.get(
-                track["contentDetails"]["videoId"], {}
-            )
-            track["rating"] = video_ratings_dict.get(
-                track["contentDetails"]["videoId"], {}
-            )
-            track["ytmusic"] = ytmusic_dict.get(track["contentDetails"]["videoId"], {})
+        tracks = []
+        for videoId in all_video_ids:
+            track = {
+                "videoId": videoId,
+                "youtube": youtube_dict.get(videoId, {}),
+                "details": video_details_dict.get(videoId, {}),
+                "rating": video_ratings_dict.get(videoId, {}),
+                "ytmusic": ytmusic_dict.get(videoId, {}),
+            }
             track.update(YTPlaylists.get_track_details(track))
-        return tracks_from_youtube
+            tracks.append(track)
+        return tracks
 
     def sort_playlist(self, target_playlist_title, archive_playlist_title, key):
         unsorted_tracks = self.get_tracks(target_playlist_title)
@@ -211,7 +227,10 @@ class YTPlaylists:
         return [
             track
             for track in tracks
-            if track["privacyStatus"] != "public" or not track["ytmusic"]
+            if track["privacyStatus"] != "public"
+            or not track["isAvailable"]
+            or not track["ytmusic"]
+            or not track["youtube"]
         ]
 
     @staticmethod
@@ -393,7 +412,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Unavailable songs",
-            ("titleLink", "artistNames", "privacyStatus", "historicalLink"),
+            ("titleLink", "artistNames", "album", "privacyStatus", "historicalLink"),
             yt_playlists.get_unavailable_tracks(tracks),
         )
         + "\n"
@@ -401,7 +420,7 @@ def problems(args: Namespace):
     print(
         yt_playlists.create_md_table(
             "Duplicates",
-            ("sanitizedTitle", "titleLink", "artistNames"),
+            ("sanitizedTitle", "titleLink", "artistNames", "album"),
             yt_playlists.get_duplicates(tracks),
         )
         + "\n"
