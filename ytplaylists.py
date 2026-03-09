@@ -108,6 +108,7 @@ class YTPlaylists:
         playlist_id = self.get_playlist_id(playlist_title)
         tracks = self.get_tracks(playlist_title)
         if playlist_id and tracks:
+            # self.youtube.
             self.ytmusic.remove_playlist_items(
                 playlistId=playlist_id,
                 videos=tracks,
@@ -173,7 +174,7 @@ class YTPlaylists:
                 for videoId in [
                     track["contentDetails"]["videoId"] for track in tracks_from_youtube
                 ]
-                + [track["videoId"] for track in tracks_from_ytmusic]
+                + [track["videoId"] or track["title"] for track in tracks_from_ytmusic]
             }.keys()
         )
         for i in range(0, len(all_video_ids), MAX_RESULTS):
@@ -202,10 +203,20 @@ class YTPlaylists:
         video_details_dict = {track["id"]: track for track in videos_details}
         video_ratings_dict = {track["videoId"]: track for track in videos_ratings}
         ytmusic_dict = {track["videoId"]: track for track in tracks_from_ytmusic}
-        missing_from_ytmusic = set(youtube_dict.keys()) - set(ytmusic_dict.keys())
-        for video_id in missing_from_ytmusic:
+
+        # Save original playlist memberships before enrichment
+        youtube_ids = set(youtube_dict.keys())
+        ytmusic_ids = set(ytmusic_dict.keys())
+
+        # Enrich ytmusic data for tracks only in YouTube
+        for video_id in youtube_ids - ytmusic_ids:
             ytmusic_dict[video_id] = self.ytmusic.get_song(video_id)
-        tracks = []
+
+        # Build tracks with categorization (use lists to handle duplicates)
+        youtube_only = []
+        ytmusic_only = []
+        result = []
+
         for videoId in all_video_ids:
             track = {
                 "videoId": videoId,
@@ -215,8 +226,57 @@ class YTPlaylists:
                 "ytmusic": ytmusic_dict.get(videoId, {}),
             }
             track.update(YTPlaylists.get_track_details(track))
-            tracks.append(track)
-        return tracks
+
+            in_youtube = videoId in youtube_ids
+            in_ytmusic = videoId in ytmusic_ids
+
+            if in_youtube and in_ytmusic:
+                result.append(track)
+            elif in_youtube:
+                youtube_only.append(track)
+            elif in_ytmusic:
+                ytmusic_only.append(track)
+
+        # Match and combine tracks by sanitized title
+        ytmusic_remaining = ytmusic_only.copy()
+
+        for yt_track in youtube_only:
+            yt_sanitized = YTPlaylists.sanitize_track_title(yt_track["title"])
+
+            # Find matching ytmusic track
+            matched_ytm = None
+            for ytm_track in ytmusic_remaining:
+                ytm_sanitized = YTPlaylists.sanitize_track_title(ytm_track["title"])
+                if yt_sanitized == ytm_sanitized:
+                    matched_ytm = ytm_track
+                    ytmusic_remaining.remove(ytm_track)
+                    break
+
+            if matched_ytm:
+                # Combine the tracks
+                combined = {
+                    "videoId": matched_ytm["videoId"],
+                    "youtube": yt_track["youtube"],
+                    "details": yt_track["details"],
+                    "rating": yt_track["rating"],
+                    "ytmusic": matched_ytm["ytmusic"],
+                }
+                combined.update(YTPlaylists.get_track_details(combined))
+                combined["historicalLink"] = (
+                    f"[{yt_track['videoId']}](https://quiteaplaylist.com/search?url=https://www.youtube.com/watch?v={yt_track['videoId']})"
+                )
+                result.append(combined)
+            else:
+                # No match, keep original
+                result.append(yt_track)
+
+        # Add remaining unmatched ytmusic tracks
+        result.extend(ytmusic_remaining)
+
+        # Sort by title
+        result.sort(key=lambda t: t["title"].lower())
+
+        return result
 
     def sort_playlist(self, target_playlist_title, archive_playlist_title, key):
         unsorted_tracks = self.get_tracks(target_playlist_title)
