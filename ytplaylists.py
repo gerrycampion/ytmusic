@@ -267,7 +267,8 @@ class YTPlaylists:
                 )
                 result.append(combined)
             else:
-                # No match, keep original
+                # No match, keep original but remove clickable link
+                yt_track["titleLink"] = yt_track["title"]
                 result.append(yt_track)
 
         # Add remaining unmatched ytmusic tracks
