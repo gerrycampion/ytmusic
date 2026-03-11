@@ -106,31 +106,81 @@ class YTPlaylists:
 
     def clear_playlist(self, playlist_title):
         playlist_id = self.get_playlist_id(playlist_title)
-        tracks = self.get_tracks(playlist_title)
-        if playlist_id and tracks:
-            # self.youtube.
-            self.ytmusic.remove_playlist_items(
-                playlistId=playlist_id,
-                videos=tracks,
-            )
+        if not playlist_id:
+            return
+
+        # Get all playlist items using YouTube API
+        playlist_items = self.fetch_all(
+            self.youtube.playlistItems().list,
+            playlistId=playlist_id,
+            part="id",
+        )
+
+        # Delete each item
+        for item in playlist_items:
+            self.youtube.playlistItems().delete(id=item["id"]).execute()
 
     def overwrite_playlist(self, target_playlist_title, archive_playlist_title, tracks):
         archive_playlist_id = self.get_playlist_id(archive_playlist_title)
         if archive_playlist_id:
             self.clear_playlist(archive_playlist_title)
         else:
-            archive_playlist_id = self.ytmusic.create_playlist(
-                archive_playlist_title, "", "PUBLIC", []
+            # Create archive playlist using YouTube API
+            response = (
+                self.youtube.playlists()
+                .insert(
+                    part="snippet,status",
+                    body={
+                        "snippet": {
+                            "title": archive_playlist_title,
+                            "description": "",
+                        },
+                        "status": {"privacyStatus": "public"},
+                    },
+                )
+                .execute()
             )
+            archive_playlist_id = response["id"]
+
         target_playlist_id = self.get_playlist_id(target_playlist_title)
-        self.ytmusic.add_playlist_items(
-            playlistId=archive_playlist_id, source_playlist=target_playlist_id
-        )
-        self.clear_playlist(target_playlist_title)
-        self.ytmusic.add_playlist_items(
+
+        # Copy all items from target to archive using YouTube API
+        target_items = self.fetch_all(
+            self.youtube.playlistItems().list,
             playlistId=target_playlist_id,
-            videoIds=[track["videoId"] for track in tracks],
+            part="snippet",
         )
+        for item in target_items:
+            self.youtube.playlistItems().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "playlistId": archive_playlist_id,
+                        "resourceId": {
+                            "kind": "youtube#video",
+                            "videoId": item["snippet"]["resourceId"]["videoId"],
+                        },
+                    }
+                },
+            ).execute()
+
+        # Clear target playlist
+        self.clear_playlist(target_playlist_title)
+
+        # Add sorted tracks to target playlist using YouTube API
+        for track in tracks:
+            self.youtube.playlistItems().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "playlistId": target_playlist_id,
+                        "resourceId": {
+                            "kind": "youtube#video",
+                            "videoId": track["videoId"],
+                        },
+                    }
+                },
+            ).execute()
 
     @staticmethod
     def get_track_details(track):
@@ -418,6 +468,99 @@ class YTPlaylists:
         ]
         return uncleanable_tracks, added_tracks, removed_tracks
 
+    def replace_with_ytmusic(self, playlist_title):
+        """
+        Replace YouTube songs with their YouTube Music equivalents.
+        For matched songs, removes YouTube version and inserts
+        YouTube Music version at the same position.
+
+        Returns: replaced_tracks list
+        """
+        playlist_id = self.get_playlist_id(playlist_title)
+        if not playlist_id:
+            return []
+
+        # Get current playlist items with positions
+        playlist_items = self.fetch_all(
+            self.youtube.playlistItems().list,
+            playlistId=playlist_id,
+            part="contentDetails,id,snippet",
+        )
+
+        # Create a mapping of videoId to playlist item ID and position
+        youtube_item_map = {
+            item["contentDetails"]["videoId"]: {"id": item["id"], "position": idx}
+            for idx, item in enumerate(playlist_items)
+        }
+
+        # Get all tracks with matching information
+        tracks = self.get_tracks(playlist_title)
+
+        # Find tracks to replace
+        tracks_to_replace = []
+        for track in tracks:
+            # Get the YouTube video ID that's currently in the playlist
+            youtube_video_id = (
+                track.get("youtube", {}).get("contentDetails", {}).get("videoId")
+            )
+
+            # Get the YouTube Music video ID
+            ytmusic_video_id = track.get("ytmusic", {}).get("videoId")
+
+            # Check if track is in YouTube playlist with different
+            # YTMusic version
+            if (
+                youtube_video_id
+                and ytmusic_video_id
+                and youtube_video_id != ytmusic_video_id
+                and youtube_video_id in youtube_item_map
+            ):
+
+                tracks_to_replace.append(
+                    {
+                        "track": track,
+                        "youtube_video_id": youtube_video_id,
+                        "ytmusic_video_id": ytmusic_video_id,
+                        "position": youtube_item_map[youtube_video_id]["position"],
+                        "playlist_item_id": (youtube_item_map[youtube_video_id]["id"]),
+                    }
+                )
+
+        # Sort by position in reverse order to avoid position shifts
+        tracks_to_replace.sort(key=lambda x: x["position"], reverse=True)
+
+        # Perform the replacements
+        replaced_tracks = []
+        for item in tracks_to_replace:
+            try:
+                # Delete the YouTube version
+                self.youtube.playlistItems().delete(
+                    id=item["playlist_item_id"]
+                ).execute()
+
+                # Insert the YouTube Music version at the same position
+                self.youtube.playlistItems().insert(
+                    part="snippet",
+                    body={
+                        "snippet": {
+                            "playlistId": playlist_id,
+                            "position": item["position"],
+                            "resourceId": {
+                                "kind": "youtube#video",
+                                "videoId": item["ytmusic_video_id"],
+                            },
+                        }
+                    },
+                ).execute()
+
+                replaced_tracks.append(item["track"])
+
+            except Exception as e:
+                title = item["track"]["title"]
+                print(f"Error replacing {title}: {str(e)}")
+
+        return replaced_tracks
+
 
 def ytmusic_oauth(_: Namespace):
     setup_oauth(
@@ -558,6 +701,30 @@ def clean(args: Namespace):
     )
 
 
+def replace_with_ytmusic(args: Namespace):
+    yt_playlists = YTPlaylists()
+    replaced_tracks = yt_playlists.replace_with_ytmusic(args.playlist_title)
+
+    if replaced_tracks:
+        print(
+            yt_playlists.create_md_table(
+                "Replaced YouTube tracks with YouTube Music versions",
+                (
+                    "titleLink",
+                    "artistNames",
+                    "album",
+                    "privacyStatus",
+                    "historicalLink",
+                ),
+                replaced_tracks,
+            )
+            + "\n"
+        )
+        print(f"Total tracks replaced: {len(replaced_tracks)}")
+    else:
+        print("No tracks were replaced.")
+
+
 if __name__ == "__main__":
     parser = ArgumentParser()
     subparsers = parser.add_subparsers()
@@ -591,6 +758,10 @@ if __name__ == "__main__":
     subparser.add_argument("clean_playlist_title", type=str)
     subparser.add_argument("archive_playlist_title", type=str)
     subparser.set_defaults(func=clean)
+
+    subparser = subparsers.add_parser("replace_with_ytmusic")
+    subparser.add_argument("playlist_title", type=str)
+    subparser.set_defaults(func=replace_with_ytmusic)
 
     args = parser.parse_args()
     args.func(args)

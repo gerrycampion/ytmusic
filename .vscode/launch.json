@@ -55,6 +55,15 @@
       "args": ["compare", "Volleyball Dirty", "Volleyball Temp"]
     },
     {
+      "name": "Replace with YTMusic",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "ytplaylists.py",
+      "console": "integratedTerminal",
+      //"justMyCode": false,
+      "args": ["replace_with_ytmusic", "Volleyball Dirty"]
+    },
+    {
       "name": "Current File",
       "type": "debugpy",
       "request": "launch",
