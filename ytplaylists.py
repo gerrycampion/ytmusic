@@ -666,14 +666,14 @@ def problems(args: Namespace):
         )
         + "\n"
     )
-    print(
-        yt_playlists.create_md_table(
-            "Title matches album",
-            ("titleLink", "artistNames", "album", "duration"),
-            yt_playlists.get_title_matches_album(tracks),
-        )
-        + "\n"
-    )
+    # print(
+    #     yt_playlists.create_md_table(
+    #         "Title matches album",
+    #         ("titleLink", "artistNames", "album", "duration"),
+    #         yt_playlists.get_title_matches_album(tracks),
+    #     )
+    #     + "\n"
+    # )
 
 
 def sort(args: Namespace):
