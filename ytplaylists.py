@@ -384,6 +384,16 @@ class YTPlaylists:
         ]
 
     @staticmethod
+    def get_title_matches_album(tracks):
+        return [
+            track
+            for track in tracks
+            if track["album"]
+            and YTPlaylists.sanitize_track_title(track["title"])
+            == YTPlaylists.sanitize_track_title(track["album"])
+        ]
+
+    @staticmethod
     def sanitize_track_title(track_title):
         return track_title.lower().split("(")[0].split("[")[0].strip()
 
@@ -653,6 +663,14 @@ def problems(args: Namespace):
             "Low-quality",
             ("titleLink", "artistNames", "videoType"),
             yt_playlists.get_low_quality_tracks(tracks),
+        )
+        + "\n"
+    )
+    print(
+        yt_playlists.create_md_table(
+            "Title matches album",
+            ("titleLink", "artistNames", "album", "duration"),
+            yt_playlists.get_title_matches_album(tracks),
         )
         + "\n"
     )
