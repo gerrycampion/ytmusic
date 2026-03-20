@@ -329,12 +329,165 @@ class YTPlaylists:
 
         return result
 
-    def sort_playlist(self, target_playlist_title, archive_playlist_title, key):
-        unsorted_tracks = self.get_tracks(target_playlist_title)
-        sorted_tracks = sorted(unsorted_tracks, key=key)
-        self.overwrite_playlist(
-            target_playlist_title, archive_playlist_title, sorted_tracks
+    @staticmethod
+    def longest_increasing_subsequence(arr):
+        """
+        Find the longest increasing subsequence using patience sorting.
+        Returns the indices of the elements in the LIS.
+        """
+        if not arr:
+            return []
+
+        n = len(arr)
+        # tails[i] stores the smallest tail element for LIS of length i+1
+        tails = []
+        # predecessors[i] stores index of predecessor of arr[i] in LIS
+        predecessors = [-1] * n
+
+        for i in range(n):
+            # Binary search to find position
+            left, right = 0, len(tails)
+            while left < right:
+                mid = (left + right) // 2
+                if arr[tails[mid]] < arr[i]:
+                    left = mid + 1
+                else:
+                    right = mid
+
+            # Update predecessor
+            if left > 0:
+                predecessors[i] = tails[left - 1]
+
+            # Update or append
+            if left < len(tails):
+                tails[left] = i
+            else:
+                tails.append(i)
+
+        # Reconstruct the LIS
+        lis = []
+        k = tails[-1]
+        while k >= 0:
+            lis.append(k)
+            k = predecessors[k]
+
+        return list(reversed(lis))
+
+    def sort_playlist(self, target_playlist_title, key):
+        playlist_id = self.get_playlist_id(target_playlist_title)
+
+        # Get current playlist items directly from YouTube API
+        current_items = self.fetch_all(
+            self.youtube.playlistItems().list,
+            playlistId=playlist_id,
+            part="contentDetails,id,snippet",
         )
+
+        # Sort items by video title
+        sorted_items = sorted(current_items, key=lambda item: key(item))
+
+        # Create mapping from playlist item ID to current position
+        current_map = {
+            item["id"]: {
+                "position": item["snippet"]["position"],
+                "videoId": item["contentDetails"]["videoId"],
+                "title": item["snippet"]["title"],
+            }
+            for item in current_items
+        }
+
+        # Create array of current positions in sorted order
+        current_positions = []
+        for item in sorted_items:
+            playlist_item_id = item["id"]
+            current_positions.append(current_map[playlist_item_id]["position"])
+
+        # Find LIS - tracks already in correct relative order
+        lis_indices = self.longest_increasing_subsequence(current_positions)
+        lis_set = set(lis_indices)
+
+        print(f"Total tracks: {len(sorted_items)}")
+        print(f"Tracks already in correct order (LIS): {len(lis_indices)}")
+        print(f"Tracks to move: {len(sorted_items) - len(lis_indices)}")
+
+        # Track current positions (will be updated as we move items)
+        current_positions_map = {
+            item["id"]: current_map[item["id"]]["position"] for item in current_items
+        }
+
+        # Collect tracks to move for reporting
+        tracks_to_move = []
+        actual_updates = 0
+
+        # Update positions for tracks that need to be moved (not in LIS)
+        # Process in reverse order to avoid position conflicts
+        for idx in range(len(sorted_items) - 1, -1, -1):
+            if idx not in lis_set:
+                item = sorted_items[idx]
+                playlist_item_id = item["id"]
+                video_id = current_map[playlist_item_id]["videoId"]
+                current_pos = current_positions_map[playlist_item_id]
+                target_pos = idx
+                title = item["snippet"]["title"]
+
+                # Skip if already in correct position
+                if current_pos == target_pos:
+                    print(f"Skipping {title} - already at position {target_pos}")
+                    continue
+
+                tracks_to_move.append(
+                    {
+                        "titleLink": f"[{title}](https://www.youtube.com/watch?v={video_id})",
+                        "sourcePosition": str(current_pos),
+                        "targetPosition": str(target_pos),
+                    }
+                )
+
+                self.youtube.playlistItems().update(
+                    part="snippet",
+                    body={
+                        "id": playlist_item_id,
+                        "snippet": {
+                            "playlistId": playlist_id,
+                            "position": target_pos,
+                            "resourceId": {
+                                "kind": "youtube#video",
+                                "videoId": video_id,
+                            },
+                        },
+                    },
+                ).execute()
+                actual_updates += 1
+
+                # Update position tracking: simulate YouTube's position shifts
+                # When moving from current_pos to target_pos, items in between shift
+                if current_pos > target_pos:
+                    # Moving up: items from target_pos to current_pos-1 shift down
+                    for item_id, pos in current_positions_map.items():
+                        if target_pos <= pos < current_pos:
+                            current_positions_map[item_id] = pos + 1
+                elif current_pos < target_pos:
+                    # Moving down: items from current_pos+1 to target_pos shift up
+                    for item_id, pos in current_positions_map.items():
+                        if current_pos < pos <= target_pos:
+                            current_positions_map[item_id] = pos - 1
+
+                # Update the moved item's position
+                current_positions_map[playlist_item_id] = target_pos
+
+        print(f"Actual API update calls made: {actual_updates}")
+
+        # Print table of moved tracks (reverse to show in forward order)
+        if tracks_to_move:
+            tracks_to_move.reverse()
+            print(
+                "\n"
+                + self.create_md_table(
+                    "Tracks Moved",
+                    ["titleLink", "sourcePosition", "targetPosition"],
+                    tracks_to_move,
+                )
+            )
 
     @staticmethod
     def get_unavailable_tracks(tracks):
@@ -680,8 +833,7 @@ def sort(args: Namespace):
     yt_playlists = YTPlaylists()
     yt_playlists.sort_playlist(
         args.target_playlist_title,
-        args.archive_playlist_title,
-        lambda track: track["title"].upper(),
+        lambda item: item["snippet"]["title"].upper(),
     )
 
 
@@ -768,7 +920,6 @@ if __name__ == "__main__":
 
     subparser = subparsers.add_parser("sort")
     subparser.add_argument("target_playlist_title", type=str)
-    subparser.add_argument("archive_playlist_title", type=str)
     subparser.set_defaults(func=sort)
 
     subparser = subparsers.add_parser("clean")

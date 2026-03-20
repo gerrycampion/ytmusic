@@ -29,7 +29,7 @@
       "program": "ytplaylists.py",
       "console": "integratedTerminal",
       //"justMyCode": false,
-      "args": ["sort", "Volleyball Dirty", "Volleyball Temp"]
+      "args": ["sort", "Volleyball Dirty"]
     },
     {
       "name": "Clean explicit playlist",
