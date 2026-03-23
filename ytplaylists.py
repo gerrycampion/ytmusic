@@ -420,8 +420,8 @@ class YTPlaylists:
         actual_updates = 0
 
         # Update positions for tracks that need to be moved (not in LIS)
-        # Process in reverse order to avoid position conflicts
-        for idx in range(len(sorted_items) - 1, -1, -1):
+        # Process in FORWARD order so earlier positions are already correct
+        for idx in range(len(sorted_items)):
             if idx not in lis_set:
                 item = sorted_items[idx]
                 playlist_item_id = item["id"]
@@ -477,9 +477,8 @@ class YTPlaylists:
 
         print(f"Actual API update calls made: {actual_updates}")
 
-        # Print table of moved tracks (reverse to show in forward order)
+        # Print table of moved tracks
         if tracks_to_move:
-            tracks_to_move.reverse()
             print(
                 "\n"
                 + self.create_md_table(
