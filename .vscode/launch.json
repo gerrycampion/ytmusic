@@ -20,7 +20,7 @@
       "program": "ytplaylists.py",
       "console": "integratedTerminal",
       //"justMyCode": false,
-      "args": ["problems", "Volleyball Dirty", "6"]
+      "args": ["problems", "Volleyball Explicit", "6"]
     },
     {
       "name": "Sort playlist",
@@ -29,7 +29,7 @@
       "program": "ytplaylists.py",
       "console": "integratedTerminal",
       //"justMyCode": false,
-      "args": ["sort", "Volleyball Dirty"]
+      "args": ["sort", "Volleyball Explicit"]
     },
     {
       "name": "Clean explicit playlist",
@@ -40,7 +40,7 @@
       //"justMyCode": false,
       "args": [
         "clean",
-        "Volleyball Dirty",
+        "Volleyball Explicit",
         "Volleyball Clean",
         "Volleyball Temp"
       ]
@@ -52,7 +52,7 @@
       "program": "ytplaylists.py",
       "console": "integratedTerminal",
       //"justMyCode": false,
-      "args": ["compare", "Volleyball Dirty", "Volleyball Temp"]
+      "args": ["compare", "Volleyball Explicit", "Volleyball Temp"]
     },
     {
       "name": "Replace with YTMusic",
@@ -61,7 +61,7 @@
       "program": "ytplaylists.py",
       "console": "integratedTerminal",
       //"justMyCode": false,
-      "args": ["replace_with_ytmusic", "Volleyball Dirty"]
+      "args": ["replace_with_ytmusic", "Volleyball Explicit"]
     },
     {
       "name": "Current File",
